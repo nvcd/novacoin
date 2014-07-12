@@ -179,11 +179,12 @@ public:
     bool getBytes(std::vector<unsigned char> &vchBytes);
 
     // ECC multiplication by specified multiplier
-    //    returns new CPoint instance
-    CPoint ECMUL(const CBigNum &bnMultiplier);
+    bool ECMUL(const CBigNum &bnMultiplier);
 
     // Calculate G*m + q
-    void ECMULGEN(const CBigNum &bnMultiplier, const CPoint &qPoint);
+    bool ECMULGEN(const CBigNum &bnMultiplier, const CPoint &qPoint);
+
+    bool IsInfinity() { return EC_POINT_is_at_infinity(group, point); }
 };
 
 class CMutablePubKey
@@ -192,7 +193,7 @@ private:
     CPubKey pubKeyL;
     CPubKey pubKeyH;
     friend class CMutableKey;
-    
+
 public:
     CMutablePubKey() { }
     CMutablePubKey(const CPubKey &pubKeyInL, const CPubKey &pubKeyInH) : pubKeyL(pubKeyInL), pubKeyH(pubKeyInH) { }
@@ -203,9 +204,9 @@ public:
     )
 
     bool IsValid() const {
-        return pubKeyL.IsValid() || pubKeyH.IsValid();
+        return pubKeyL.IsValid() && pubKeyH.IsValid();
     }
-    
+
     CPubKey& GetL() { return pubKeyL; }
     CPubKey& GetH() { return pubKeyH; }
     bool GetVariant(CPubKey &R, CPubKey &vchPubKeyVariant);
@@ -220,22 +221,21 @@ private:
 public:
     CMutableKey();
     CMutableKey(const CMutableKey &b);
-    CMutableKey& operator=(const CMutableKey& b);
+    CMutableKey& operator=(const CMutableKey &b);
     ~CMutableKey();
-    
+
     void Reset();
     bool IsNull() const;
     void MakeNewKeys();
-    
-    bool SetPrivKeys(const CPrivKey& vchPrivKeyL, const CPrivKey& vchPrivKeyH);
-    bool SetSecrets(const CSecret& vchSecretL, const CSecret& vchSecretH);
-    void GetSecrets(CSecret& vchSecretL, CSecret& vchSecretH) const;
-    void GetPrivKeys(CPrivKey& vchPrivKeyL, CPrivKey& vchPrivKeyH) const;
+
+    bool SetPrivKeys(const CPrivKey &vchPrivKeyL, const CPrivKey &vchPrivKeyH);
+    bool SetSecrets(const CSecret &vchSecretL, const CSecret &vchSecretH);
+    void GetSecrets(CSecret &vchSecretL, CSecret &vchSecretH) const;
+    void GetPrivKeys(CPrivKey &vchPrivKeyL, CPrivKey &vchPrivKeyH) const;
 
     CMutablePubKey GetMutablePubKey() const;
 
     bool CheckKeyVariant(const CPubKey &R, const CPubKey &H, const CPubKey &vchPubKeyVariant, CKey &privKeyVariant);
 };
-
 
 #endif
