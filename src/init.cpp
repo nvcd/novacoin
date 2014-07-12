@@ -365,6 +365,44 @@ bool AppInit2()
 
     // ********************************************************* Step 2: parameter interactions
 
+    if (mapArgs.count("-keygentest")) {
+        // generate and check 100000 key pairs and exit
+
+        CMutableKey mk;
+        mk.MakeNewKeys();
+        CMutablePubKey mpk = mk.GetMutablePubKey();
+
+        bool fCompressed;
+
+        CPubKey R, H, vchPubKeyVariant, RES;
+        CKey privKeyVariant;
+        CSecret vchPrivKeyVariant;
+        H = mpk.GetH();
+
+        std::cout << "L = " << HexStr(mpk.GetL().Raw()) << ""
+                     "H = " << HexStr(mpk.GetH().Raw()) << std::endl;
+
+        for (int i = 0; i < 100000; i++)
+        {
+            if (!mpk.GetVariant(R, vchPubKeyVariant))
+                break;
+
+            if (!mk.CheckKeyVariant(R, H, vchPubKeyVariant, privKeyVariant))
+                break;
+
+            vchPrivKeyVariant = privKeyVariant.GetSecret(fCompressed);
+            RES = privKeyVariant.GetPubKey();
+
+            assert(RES == vchPubKeyVariant);
+
+            std::cout << "R = " << HexStr(R.Raw()) << " "
+                      << "PUB = " << HexStr(vchPubKeyVariant.Raw()) << " "
+                      << "PRIV = " << HexStr(vchPrivKeyVariant.begin(), vchPrivKeyVariant.end()) << std::endl;
+        }
+
+        exit(-1);
+    }
+
     nNodeLifespan = GetArg("-addrlifespan", 7);
     fUseFastIndex = GetBoolArg("-fastindex", true);
     nMinerSleep = GetArg("-minersleep", 500);
