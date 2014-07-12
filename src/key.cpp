@@ -408,3 +408,321 @@ bool CKey::IsValid()
     key2.SetSecret(secret, fCompr);
     return GetPubKey() == key2.GetPubKey();
 }
+
+CPoint::CPoint()
+{
+    std::string err;
+    group = NULL;
+    point = NULL;
+    ctx   = NULL;
+
+    group = EC_GROUP_new_by_curve_name(NID_secp256k1);
+    if (!group) {
+        err = "EC_KEY_new_by_curve_name failed.";
+        goto finish;
+    }
+    point = EC_POINT_new(group);
+    if (!point) {
+        err = "EC_POINT_new failed.";
+        goto finish;
+    }
+
+    ctx = BN_CTX_new();
+    if (!ctx) {
+        err = "BN_CTX_new failed.";
+        goto finish;
+    }
+
+    return;
+
+finish:
+    if (group) EC_GROUP_free(group);
+    if (point) EC_POINT_free(point);
+    throw std::runtime_error(std::string("CPoint::CPoint() :  - ") + err);
+}
+
+bool CPoint::operator!=(const CPoint &a)
+{
+    if (EC_POINT_cmp(group, point, a.point, ctx) != 0)
+        return true;
+    return false;
+}
+CPoint::~CPoint()
+{
+    if (point) EC_POINT_free(point);
+    if (group) EC_GROUP_free(group);
+    if (ctx)   BN_CTX_free(ctx);
+}
+
+// Initialize from octets stream
+bool CPoint::setBytes(const std::vector<unsigned char> &vchBytes)
+{
+    if (!EC_POINT_oct2point(group, point, &vchBytes[0], vchBytes.size(), ctx)) {
+        return false;
+    }
+    return true;
+}
+
+// Serialize to octets stream
+bool CPoint::getBytes(std::vector<unsigned char> &vchBytes)
+{
+    unsigned int nSize = EC_POINT_point2oct(group, point, POINT_CONVERSION_COMPRESSED, NULL, 0, ctx);
+    vchBytes.resize(nSize);
+    if (!(nSize == EC_POINT_point2oct(group, point, POINT_CONVERSION_COMPRESSED, &vchBytes[0], nSize, ctx))) {
+        return false;
+    }
+    return true;
+}
+
+// ECC multiplication by specified multiplier
+//    returns new CPoint instance
+CPoint CPoint::ECMUL(const CBigNum &bnMultiplier)
+{
+    CPoint result;
+    if (!EC_POINT_mul(group, result.point, NULL, point, &bnMultiplier, NULL)) {
+        throw std::runtime_error("CPoint::ECMUL() : EC_POINT_mul failed");
+    }
+
+    return result;
+}
+
+// Calculate G*m + q
+void CPoint::ECMULGEN(const CBigNum &bnMultiplier, const CPoint &qPoint)
+{
+    if (!EC_POINT_mul(group, point, &bnMultiplier, qPoint.point, BN_value_one(), NULL)) {
+        throw std::runtime_error("CPoint::ECMULGEN() : EC_POINT_mul failed.");
+    }
+}
+
+// CMutablePubKey
+
+bool CMutablePubKey::GetVariant(CPubKey &R, CPubKey &vchPubKeyVariant)
+{
+    std::string err;
+
+finish:
+    if (err.size()) {
+        throw key_error(std::string("CMutablePubKey::GetVariant() : ") + err);
+    }
+
+    EC_KEY *eckey = NULL;
+    eckey = EC_KEY_new_by_curve_name(NID_secp256k1);
+    if (eckey == NULL) {
+        err = "EC_KEY_new_by_curve_name failed";
+        goto finish;
+    }
+
+    // Use standard key generation function to get r and R values.
+    //
+    // r will be presented by private key;
+    // R is ECDSA public key which calculated as G*r
+    if (!EC_KEY_generate_key(eckey)) {
+        err = "EC_KEY_generate_key failed";
+        goto finish;
+    }
+
+    EC_KEY_set_conv_form(eckey, POINT_CONVERSION_COMPRESSED);
+
+    int nSize = i2o_ECPublicKey(eckey, NULL);
+    if (!nSize) {
+        err = "i2o_ECPublicKey failed";
+        goto finish;
+    }
+
+    std::vector<unsigned char> vchPubKey(nSize, 0);
+    unsigned char* pbegin_R = &vchPubKey[0];
+
+    if (i2o_ECPublicKey(eckey, &pbegin_R) != nSize) {
+        err = "i2o_ECPublicKey returned unexpected size";
+        goto finish;
+    }
+
+    // R = G*r
+    R = CPubKey(vchPubKey);
+
+    // OpenSSL BIGNUM representation of r value
+    CBigNum bnr;
+    bnr = *(CBigNum*) EC_KEY_get0_private_key(eckey);
+    EC_KEY_free(eckey);
+
+    CPoint point_L;
+    if (!point_L.setBytes(pubKeyL.Raw())) {
+        err = "Unable to decode L value";
+        goto finish;
+    }
+
+    // Calculate L*r
+    CPoint pointLr = point_L.ECMUL(bnr);
+
+    std::vector<unsigned char> vchLr;
+    if (!pointLr.getBytes(vchLr)) {
+        err = "Unable to convert Lr value";
+        goto finish;
+    }
+
+    // Calculate Hash(L*r) and then get a BIGNUM representation of hash value.
+    CBigNum bnHash;
+    bnHash.setuint160(Hash160(vchLr.begin(), vchLr.end()));
+
+    CPoint pointH;
+    pointH.setBytes(pubKeyH.Raw());
+
+    CPoint P;
+    // Calculate P = Hash(L*r)*R + H
+    P.ECMULGEN(bnHash, pointH);
+
+    std::vector<unsigned char> vchResult;
+    P.getBytes(vchResult);
+
+    vchPubKeyVariant = CPubKey(vchResult);
+
+    return true;
+}
+
+// CMutableKey
+
+void CMutableKey::Reset()
+{
+    keyL.Reset();
+    keyH.Reset();
+}
+
+CMutableKey::CMutableKey()
+{
+    keyL = CKey();
+    keyH = CKey();
+    Reset();
+}
+
+CMutableKey::CMutableKey(const CMutableKey& b)
+{
+    keyL = CKey(b.keyL);
+    keyH = CKey(b.keyH);
+}
+
+CMutableKey& CMutableKey::operator=(const CMutableKey& b)
+{
+    keyL = b.keyL;
+    keyH = b.keyH;
+
+    return (*this);
+}
+
+CMutableKey::~CMutableKey()
+{
+}
+
+bool CMutableKey::IsNull() const
+{
+    return keyL.IsNull() || keyH.IsNull();
+}
+
+void CMutableKey::MakeNewKeys()
+{
+    keyL.MakeNewKey(true);
+    keyH.MakeNewKey(true);
+}
+
+
+bool CMutableKey::SetPrivKeys(const CPrivKey& vchPrivKeyL, const CPrivKey& vchPrivKeyH)
+{
+    if (!keyL.SetPrivKey(vchPrivKeyL) || !keyH.SetPrivKey(vchPrivKeyH))
+        return false;
+
+    return true;
+}
+
+bool CMutableKey::SetSecrets(const CSecret& vchSecretL, const CSecret& vchSecretH)
+{
+    if (!keyL.SetSecret(vchSecretL, true) || !keyH.SetSecret(vchSecretH, true))
+        return false;
+
+    return true;
+}
+
+void CMutableKey::GetSecrets(CSecret& vchSecretL, CSecret& vchSecretH) const
+{
+    bool fCompressed = true;
+
+    vchSecretL = keyL.GetSecret(fCompressed);
+    vchSecretH = keyH.GetSecret(fCompressed);
+}
+
+void CMutableKey::GetPrivKeys(CPrivKey& vchPrivKeyL, CPrivKey& vchPrivKeyH) const
+{
+    vchPrivKeyL = keyL.GetPrivKey();
+    vchPrivKeyH = keyH.GetPrivKey();
+}
+
+CMutablePubKey CMutableKey::GetMutablePubKey() const
+{
+    return CMutablePubKey(keyL.GetPubKey(), keyH.GetPubKey());
+}
+
+bool CMutableKey::CheckKeyVariant(const CPubKey &R, const CPubKey &H, const CPubKey &vchPubKeyVariant, CKey &privKeyVariant)
+{
+    std::string err;
+
+finish:
+    if (err.size()) {
+        throw key_error(std::string("CMutablePubKey::CheckKeyVariant() : ") + err);
+    }
+
+    CPoint point_R;
+    if (!point_R.setBytes(R.Raw())) {
+        err = "Unable to decode R value";
+        goto finish;
+    }
+
+    CPoint point_H;
+    if (!point_H.setBytes(H.Raw())) {
+        err = "Unable to decode H value";
+        goto finish;
+    }
+
+    CPoint point_P;
+    if (!point_P.setBytes(vchPubKeyVariant.Raw())) {
+        err = "Unable to decode P value";
+        goto finish;
+    }
+
+    bool fCompressed;
+    CSecret vchSecretL = keyL.GetSecret(fCompressed);
+    CSecret vchSecretH = keyH.GetSecret(fCompressed);
+
+    CBigNum bnl;
+    bnl.setBytes(std::vector<unsigned char>(vchSecretL.begin(), vchSecretL.end()));
+
+    CPoint point_Rl = point_R.ECMUL(bnl);
+
+    std::vector<unsigned char> vchRl;
+    if (!point_Rl.getBytes(vchRl)) {
+        err = "Unable to convert Rl value";
+        goto finish;
+    }
+
+    // Calculate Hash(R*l)
+    CBigNum bnHash;
+    bnHash.setuint160(Hash160(vchRl.begin(), vchRl.end()));
+
+    CPoint point_Ps;
+    // Calculate Ps = Hash(L*r)*G + H
+    point_Ps.ECMULGEN(bnHash, point_H);
+
+    // Check ownership
+    if (point_Ps != point_P) {
+        return false;
+    }
+
+    // OpenSSL BIGNUM representation of the second private key from (l, h) pair
+    CBigNum bnh;
+    bnh.setBytes(std::vector<unsigned char>(vchSecretH.begin(), vchSecretH.end()));
+
+    // Calculate p = Hash(R*l) + h
+    CBigNum bnp = bnHash + bnh;
+
+    std::vector<unsigned char> vchp = bnp.getBytes();
+    privKeyVariant.SetSecret(CSecret(vchp.begin(), vchp.end()), true);
+
+    return true;
+}
