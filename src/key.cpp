@@ -8,6 +8,7 @@
 #include <openssl/obj_mac.h>
 
 #include "key.h"
+#include "base58.h"
 
 // Generate a private key from just the secret parameter
 int EC_KEY_regenerate_key(EC_KEY *eckey, BIGNUM *priv_key)
@@ -644,6 +645,40 @@ bool CMutablePubKey::GetVariant(CPubKey &R, CPubKey &vchPubKeyVariant)
 
     return true;
 }
+
+std::string CMutablePubKey::ToString()
+{
+    CDataStream ssKey(SER_NETWORK, PROTOCOL_VERSION);
+    ssKey << *this;
+    std::vector<unsigned char> vch(ssKey.begin(), ssKey.end());
+
+    return EncodeBase58Check(vch);
+}
+
+bool CMutablePubKey::SetString(const std::string& strMutablePubKey)
+{
+    std::vector<unsigned char> vchTemp;
+    DecodeBase58Check(strMutablePubKey, vchTemp);
+
+    if (vchTemp.empty())
+    {
+        nVersion = 0;
+        return false;
+    }
+
+    CDataStream ssKey(vchTemp, SER_NETWORK, PROTOCOL_VERSION);
+    ssKey >> *this;
+
+    return IsValid();
+}
+
+bool CMutablePubKey::operator==(const CMutablePubKey &b)
+{
+    return (nVersion == b.nVersion &&
+            pubKeyL == b.pubKeyL &&
+            pubKeyH == b.pubKeyH);
+}
+
 
 // CMutableKey
 

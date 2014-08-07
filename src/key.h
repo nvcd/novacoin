@@ -193,15 +193,21 @@ public:
 class CMutablePubKey
 {
 private:
+    unsigned char nVersion;
     CPubKey pubKeyL;
     CPubKey pubKeyH;
     friend class CMutableKey;
 
+    static const unsigned char CURRENT_VERSION = 1;
+
 public:
-    CMutablePubKey() { }
-    CMutablePubKey(const CPubKey &pubKeyInL, const CPubKey &pubKeyInH) : pubKeyL(pubKeyInL), pubKeyH(pubKeyInH) { }
+    CMutablePubKey() { nVersion = CMutablePubKey::CURRENT_VERSION; }
+    CMutablePubKey(const std::string& strMutablePubKey) { SetString(strMutablePubKey); }
+    CMutablePubKey(const CPubKey &pubKeyInL, const CPubKey &pubKeyInH) : pubKeyL(pubKeyInL), pubKeyH(pubKeyInH) { nVersion = CMutablePubKey::CURRENT_VERSION; }
 
     IMPLEMENT_SERIALIZE(
+        READWRITE(this->nVersion);
+        nVersion = this->nVersion;
         READWRITE(pubKeyL);
         READWRITE(pubKeyH);
     )
@@ -209,6 +215,12 @@ public:
     bool IsValid() const {
         return pubKeyL.IsValid() && pubKeyH.IsValid();
     }
+
+    bool operator==(const CMutablePubKey &b);
+    bool operator!=(const CMutablePubKey &b) { return !(*this == b); }
+
+    std::string ToString();
+    bool SetString(const std::string& strMutablePubKey);
 
     CPubKey& GetL() { return pubKeyL; }
     CPubKey& GetH() { return pubKeyH; }

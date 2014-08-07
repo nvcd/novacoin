@@ -384,10 +384,13 @@ bool AppInit2()
         CSecret vchPrivKeyVariant;
         H = mpk.GetH();
 
-        std::cout << "L = " << HexStr(mpk.GetL().Raw()) << ""
-                     "H = " << HexStr(mpk.GetH().Raw()) << std::endl;
+        std::cout << "L = " << HexStr(mpk.GetL().Raw()) << " "
+                  << "H = " << HexStr(mpk.GetH().Raw()) << " "
+                  << "ADDR = " << mpk.ToString() << std::endl;
 
-        for (int i = 0; i < 100000; i++)
+        assert(mpk == CMutablePubKey(mpk.ToString()));
+
+        for (int i = 0; i < 1000; i++)
         {
             if (!mpk.GetVariant(R, vchPubKeyVariant))
                 break;
