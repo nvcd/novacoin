@@ -163,4 +163,82 @@ public:
     static bool CheckSignatureElement(const unsigned char *vch, int len, bool half);
 };
 
+class CPoint
+{
+private:
+    EC_POINT *point;
+    EC_GROUP* group;
+    BN_CTX* ctx;
+
+public:
+    CPoint();
+    bool operator!=(const CPoint &a);
+    ~CPoint();
+
+    // Initialize from octets stream
+    bool setBytes(const std::vector<unsigned char> &vchBytes);
+
+    // Serialize to octets stream
+    bool getBytes(std::vector<unsigned char> &vchBytes);
+
+    // ECC multiplication by specified multiplier
+    bool ECMUL(const CBigNum &bnMultiplier);
+
+    // Calculate G*m + q
+    bool ECMULGEN(const CBigNum &bnMultiplier, const CPoint &qPoint);
+
+    bool IsInfinity() { return EC_POINT_is_at_infinity(group, point); }
+};
+
+class CMutablePubKey
+{
+private:
+    CPubKey pubKeyL;
+    CPubKey pubKeyH;
+    friend class CMutableKey;
+
+public:
+    CMutablePubKey() { }
+    CMutablePubKey(const CPubKey &pubKeyInL, const CPubKey &pubKeyInH) : pubKeyL(pubKeyInL), pubKeyH(pubKeyInH) { }
+
+    IMPLEMENT_SERIALIZE(
+        READWRITE(pubKeyL);
+        READWRITE(pubKeyH);
+    )
+
+    bool IsValid() const {
+        return pubKeyL.IsValid() && pubKeyH.IsValid();
+    }
+
+    CPubKey& GetL() { return pubKeyL; }
+    CPubKey& GetH() { return pubKeyH; }
+    bool GetVariant(CPubKey &R, CPubKey &vchPubKeyVariant);
+};
+
+class CMutableKey
+{
+private:
+    CKey keyL;
+    CKey keyH;
+
+public:
+    CMutableKey();
+    CMutableKey(const CMutableKey &b);
+    CMutableKey& operator=(const CMutableKey &b);
+    ~CMutableKey();
+
+    void Reset();
+    bool IsNull() const;
+    void MakeNewKeys();
+
+    bool SetPrivKeys(const CPrivKey &vchPrivKeyL, const CPrivKey &vchPrivKeyH);
+    bool SetSecrets(const CSecret &vchSecretL, const CSecret &vchSecretH);
+    void GetSecrets(CSecret &vchSecretL, CSecret &vchSecretH) const;
+    void GetPrivKeys(CPrivKey &vchPrivKeyL, CPrivKey &vchPrivKeyH) const;
+
+    CMutablePubKey GetMutablePubKey() const;
+
+    bool CheckKeyVariant(const CPubKey &R, const CPubKey &H, const CPubKey &vchPubKeyVariant, CKey &privKeyVariant);
+};
+
 #endif
