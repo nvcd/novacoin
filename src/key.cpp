@@ -672,6 +672,17 @@ bool CMutablePubKey::SetString(const std::string& strMutablePubKey)
     return IsValid();
 }
 
+uint256 CMutablePubKey::GetID() const
+{
+    std::vector<unsigned char> vchTemp;
+
+    CDataStream ssKey(SER_NETWORK, PROTOCOL_VERSION);
+    ssKey << *this;
+
+    return Hash(ssKey.begin(), ssKey.end());
+}
+
+
 bool CMutablePubKey::operator==(const CMutablePubKey &b)
 {
     return (nVersion == b.nVersion &&
@@ -684,27 +695,53 @@ bool CMutablePubKey::operator==(const CMutablePubKey &b)
 
 void CMutableKey::Reset()
 {
-    keyL.Reset();
-    keyH.Reset();
+    vchSecretL.clear();
+    vchSecretH.clear();
+
+    fSet = false;
+}
+
+void CMutableKey::MakeNewKeys()
+{
+    CKey L, H;
+    bool fCompressed = true;
+
+    L.MakeNewKey(true);
+    H.MakeNewKey(true);
+
+    vchSecretL = L.GetSecret(fCompressed);
+    vchSecretH = H.GetSecret(fCompressed);
+
+    vchPubKeyL = L.GetPubKey().Raw();
+    vchPubKeyH = H.GetPubKey().Raw();
+
+    fSet = true;
+}
+
+uint256 CMutableKey::GetID() const
+{
+    return GetMutablePubKey().GetID();
 }
 
 CMutableKey::CMutableKey()
 {
-    keyL = CKey();
-    keyH = CKey();
     Reset();
 }
 
 CMutableKey::CMutableKey(const CMutableKey &b)
 {
-    keyL = CKey(b.keyL);
-    keyH = CKey(b.keyH);
+    SetSecrets(b.vchSecretL, b.vchSecretH);
 }
+
+CMutableKey::CMutableKey(const CSecret &L, const CSecret &H)
+{
+    SetSecrets(L, H);
+}
+
 
 CMutableKey& CMutableKey::operator=(const CMutableKey &b)
 {
-    keyL = b.keyL;
-    keyH = b.keyH;
+    SetSecrets(b.vchSecretL, b.vchSecretH);
 
     return (*this);
 }
@@ -715,62 +752,51 @@ CMutableKey::~CMutableKey()
 
 bool CMutableKey::IsNull() const
 {
-    return keyL.IsNull() || keyH.IsNull();
+    return !fSet;
 }
 
-void CMutableKey::MakeNewKeys()
+bool CMutableKey::SetSecrets(const CSecret &pvchSecretL, const CSecret &pvchSecretH)
 {
-    keyL.MakeNewKey(true);
-    keyH.MakeNewKey(true);
-}
+    Reset();
+    CKey L, H;
 
+    if (!L.SetSecret(pvchSecretL, true) || !H.SetSecret(pvchSecretH, true))
+    {
+        fSet = false;
 
-bool CMutableKey::SetPrivKeys(const CPrivKey &vchPrivKeyL, const CPrivKey &vchPrivKeyH)
-{
-    if (!keyL.SetPrivKey(vchPrivKeyL) || !keyH.SetPrivKey(vchPrivKeyH))
         return false;
+    }
+
+    vchSecretL = pvchSecretL;
+    vchSecretH = pvchSecretH;
+
+    vchPubKeyL = L.GetPubKey().Raw();
+    vchPubKeyH = H.GetPubKey().Raw();
+    fSet = true;
 
     return true;
 }
 
-bool CMutableKey::SetSecrets(const CSecret &vchSecretL, const CSecret &vchSecretH)
+void CMutableKey::GetSecrets(CSecret &pvchSecretL, CSecret &pvchSecretH) const
 {
-    if (!keyL.SetSecret(vchSecretL, true) || !keyH.SetSecret(vchSecretH, true))
-        return false;
-
-    return true;
-}
-
-void CMutableKey::GetSecrets(CSecret &vchSecretL, CSecret &vchSecretH) const
-{
-    bool fCompressed = true;
-
-    vchSecretL = keyL.GetSecret(fCompressed);
-    vchSecretH = keyH.GetSecret(fCompressed);
-}
-
-void CMutableKey::GetPrivKeys(CPrivKey &vchPrivKeyL, CPrivKey &vchPrivKeyH) const
-{
-    vchPrivKeyL = keyL.GetPrivKey();
-    vchPrivKeyH = keyH.GetPrivKey();
+    pvchSecretL = vchSecretL;
+    pvchSecretH = vchSecretH;
 }
 
 CMutablePubKey CMutableKey::GetMutablePubKey() const
 {
-    return CMutablePubKey(keyL.GetPubKey(), keyH.GetPubKey());
+    return CMutablePubKey(vchPubKeyL, vchPubKeyH);
 }
 
-bool CMutableKey::CheckKeyVariant(const CPubKey &R, const CPubKey &H, const CPubKey &vchPubKeyVariant, CKey &privKeyVariant)
+// Check ownership
+bool CMutableKey::CheckKeyVariant(const CPubKey &R, const CPubKey &vchPubKeyVariant)
 {
+    if (IsNull())
+        return false;
+
     if (!R.IsValid())
     {
         printf("CMutableKey::CheckKeyVariant() : R is invalid");
-        return false;
-    }
-
-    if (!H.IsValid())
-    {
-        printf("CMutableKey::CheckKeyVariant() : H is invalid");
         return false;
     }
 
@@ -787,7 +813,7 @@ bool CMutableKey::CheckKeyVariant(const CPubKey &R, const CPubKey &H, const CPub
     }
 
     CPoint point_H;
-    if (!point_H.setBytes(H.Raw())) {
+    if (!point_H.setBytes(vchPubKeyH)) {
         printf("CMutableKey::CheckKeyVariant() : Unable to decode H value");
         return false;
     }
@@ -802,9 +828,77 @@ bool CMutableKey::CheckKeyVariant(const CPubKey &R, const CPubKey &H, const CPub
     if (point_P.IsInfinity())
         return false;
 
-    bool fCompressed;
-    CSecret vchSecretL = keyL.GetSecret(fCompressed);
-    CSecret vchSecretH = keyH.GetSecret(fCompressed);
+    CBigNum bnl;
+    bnl.setBytes(std::vector<unsigned char>(vchSecretL.begin(), vchSecretL.end()));
+
+    point_R.ECMUL(bnl);
+
+    std::vector<unsigned char> vchRl;
+    if (!point_R.getBytes(vchRl)) {
+        printf("CMutableKey::CheckKeyVariant() : Unable to convert Rl value");
+        return false;
+    }
+
+    // Calculate Hash(R*l)
+    CBigNum bnHash;
+    bnHash.setuint160(Hash160(vchRl));
+
+    CPoint point_Ps;
+    // Calculate Ps = Hash(L*r)*G + H
+    point_Ps.ECMULGEN(bnHash, point_H);
+
+    // Infinity points are senseless
+    if (point_Ps.IsInfinity()) {
+        return false;
+    }
+
+    // Check ownership
+    if (point_Ps.IsInfinity() || point_Ps != point_P) {
+        return false;
+    }
+
+    return true;
+}
+
+// Check ownership and restore private key
+bool CMutableKey::CheckKeyVariant(const CPubKey &R, const CPubKey &vchPubKeyVariant, CKey &privKeyVariant)
+{
+    if (IsNull())
+        return false;
+
+    if (!R.IsValid())
+    {
+        printf("CMutableKey::CheckKeyVariant() : R is invalid");
+        return false;
+    }
+
+    if (!vchPubKeyVariant.IsValid())
+    {
+        printf("CMutableKey::CheckKeyVariant() : public key variant is invalid");
+        return false;
+    }
+
+    CPoint point_R;
+    if (!point_R.setBytes(R.Raw())) {
+        printf("CMutableKey::CheckKeyVariant() : Unable to decode R value");
+        return false;
+    }
+
+    CPoint point_H;
+    if (!point_H.setBytes(vchPubKeyH)) {
+        printf("CMutableKey::CheckKeyVariant() : Unable to decode H value");
+        return false;
+    }
+
+    CPoint point_P;
+    if (!point_P.setBytes(vchPubKeyVariant.Raw())) {
+        printf("CMutableKey::CheckKeyVariant() : Unable to decode P value");
+        return false;
+    }
+
+    // Infinity points are senseless
+    if (point_P.IsInfinity())
+        return false;
 
     CBigNum bnl;
     bnl.setBytes(std::vector<unsigned char>(vchSecretL.begin(), vchSecretL.end()));
@@ -847,3 +941,114 @@ bool CMutableKey::CheckKeyVariant(const CPubKey &R, const CPubKey &H, const CPub
 
     return true;
 }
+
+
+// CMutableKeyView
+
+uint256 CMutableKeyView::GetID() const
+{
+    return GetMutablePubKey().GetID();
+}
+
+CMutableKeyView::CMutableKeyView(const CMutableKey &b)
+{
+    assert(b.fSet);
+    vchSecretL = b.vchSecretL;
+    vchPubKeyH = b.vchPubKeyH;
+}
+
+CMutableKeyView::CMutableKeyView(const CSecret &L, const CPubKey &pvchPubKeyH)
+{
+    vchSecretL = L;
+    vchPubKeyH = pvchPubKeyH.Raw();
+}
+
+CMutableKeyView& CMutableKeyView::operator=(const CMutableKey &b)
+{
+    assert(b.fSet);
+    vchSecretL = b.vchSecretL;
+    vchPubKeyH = b.vchPubKeyH;
+
+    return (*this);
+}
+
+CMutableKeyView::~CMutableKeyView()
+{
+}
+
+CMutablePubKey CMutableKeyView::GetMutablePubKey() const
+{
+    CKey keyL;
+    keyL.SetSecret(vchSecretL, true);
+    return CMutablePubKey(keyL.GetPubKey(), vchPubKeyH);
+}
+
+// Check ownership
+bool CMutableKeyView::CheckKeyVariant(const CPubKey &R, const CPubKey &vchPubKeyVariant)
+{
+    if (!R.IsValid())
+    {
+        printf("CMutableKey::CheckKeyVariant() : R is invalid");
+        return false;
+    }
+
+    if (!vchPubKeyVariant.IsValid())
+    {
+        printf("CMutableKey::CheckKeyVariant() : public key variant is invalid");
+        return false;
+    }
+
+    CPoint point_R;
+    if (!point_R.setBytes(R.Raw())) {
+        printf("CMutableKey::CheckKeyVariant() : Unable to decode R value");
+        return false;
+    }
+
+    CPoint point_H;
+    if (!point_H.setBytes(vchPubKeyH)) {
+        printf("CMutableKey::CheckKeyVariant() : Unable to decode H value");
+        return false;
+    }
+
+    CPoint point_P;
+    if (!point_P.setBytes(vchPubKeyVariant.Raw())) {
+        printf("CMutableKey::CheckKeyVariant() : Unable to decode P value");
+        return false;
+    }
+
+    // Infinity points are senseless
+    if (point_P.IsInfinity())
+        return false;
+
+    CBigNum bnl;
+    bnl.setBytes(std::vector<unsigned char>(vchSecretL.begin(), vchSecretL.end()));
+
+    point_R.ECMUL(bnl);
+
+    std::vector<unsigned char> vchRl;
+    if (!point_R.getBytes(vchRl)) {
+        printf("CMutableKey::CheckKeyVariant() : Unable to convert Rl value");
+        return false;
+    }
+
+    // Calculate Hash(R*l)
+    CBigNum bnHash;
+    bnHash.setuint160(Hash160(vchRl));
+
+    CPoint point_Ps;
+    // Calculate Ps = Hash(L*r)*G + H
+    point_Ps.ECMULGEN(bnHash, point_H);
+
+    // Infinity points are senseless
+    if (point_Ps.IsInfinity()) {
+        return false;
+    }
+
+    // Check ownership
+    if (point_Ps.IsInfinity() || point_Ps != point_P) {
+        return false;
+    }
+
+    return true;
+}
+

@@ -376,6 +376,7 @@ bool AppInit2()
         CMutableKey mk;
         mk.MakeNewKeys();
         CMutablePubKey mpk = mk.GetMutablePubKey();
+        CMutableKeyView mkv(mk);
 
         bool fCompressed;
 
@@ -395,8 +396,10 @@ bool AppInit2()
             if (!mpk.GetVariant(R, vchPubKeyVariant))
                 break;
 
-            if (!mk.CheckKeyVariant(R, H, vchPubKeyVariant, privKeyVariant))
+            if (!mk.CheckKeyVariant(R, vchPubKeyVariant, privKeyVariant))
                 break;
+
+            assert(mkv.CheckKeyVariant(R, vchPubKeyVariant));
 
             vchPrivKeyVariant = privKeyVariant.GetSecret(fCompressed);
             RES = privKeyVariant.GetPubKey();

@@ -204,6 +204,7 @@ public:
     CMutablePubKey() { nVersion = CMutablePubKey::CURRENT_VERSION; }
     CMutablePubKey(const std::string& strMutablePubKey) { SetString(strMutablePubKey); }
     CMutablePubKey(const CPubKey &pubKeyInL, const CPubKey &pubKeyInH) : pubKeyL(pubKeyInL), pubKeyH(pubKeyInH) { nVersion = CMutablePubKey::CURRENT_VERSION; }
+    CMutablePubKey(const std::vector<unsigned char> &pubKeyInL, const std::vector<unsigned char> &pubKeyInH) : pubKeyL(pubKeyInL), pubKeyH(pubKeyInH) { nVersion = CMutablePubKey::CURRENT_VERSION; }
 
     IMPLEMENT_SERIALIZE(
         READWRITE(this->nVersion);
@@ -221,6 +222,7 @@ public:
 
     std::string ToString();
     bool SetString(const std::string& strMutablePubKey);
+    uint256 GetID() const;
 
     CPubKey& GetL() { return pubKeyL; }
     CPubKey& GetH() { return pubKeyH; }
@@ -230,27 +232,57 @@ public:
 class CMutableKey
 {
 private:
-    CKey keyL;
-    CKey keyH;
+    bool fSet;
+    CSecret vchSecretL;
+    CSecret vchSecretH;
+
+    std::vector<unsigned char> vchPubKeyL;
+    std::vector<unsigned char> vchPubKeyH;
+    friend class CMutableKeyView;
 
 public:
     CMutableKey();
     CMutableKey(const CMutableKey &b);
+    CMutableKey(const CSecret &L, const CSecret &H);
     CMutableKey& operator=(const CMutableKey &b);
     ~CMutableKey();
 
     void Reset();
-    bool IsNull() const;
     void MakeNewKeys();
+    bool IsNull() const;
+    uint256 GetID() const;
 
-    bool SetPrivKeys(const CPrivKey &vchPrivKeyL, const CPrivKey &vchPrivKeyH);
-    bool SetSecrets(const CSecret &vchSecretL, const CSecret &vchSecretH);
-    void GetSecrets(CSecret &vchSecretL, CSecret &vchSecretH) const;
-    void GetPrivKeys(CPrivKey &vchPrivKeyL, CPrivKey &vchPrivKeyH) const;
+    bool SetSecrets(const CSecret &pvchSecretL, const CSecret &pvchSecretH);
+    void GetSecrets(CSecret &pvchSecretL, CSecret &pvchSecretH) const;
 
     CMutablePubKey GetMutablePubKey() const;
 
-    bool CheckKeyVariant(const CPubKey &R, const CPubKey &H, const CPubKey &vchPubKeyVariant, CKey &privKeyVariant);
+    bool CheckKeyVariant(const CPubKey &R, const CPubKey &vchPubKeyVariant);
+    bool CheckKeyVariant(const CPubKey &R, const CPubKey &vchPubKeyVariant, CKey &privKeyVariant);
+};
+
+class CMutableKeyView
+{
+private:
+    CSecret vchSecretL;
+    std::vector<unsigned char> vchPubKeyH;
+
+    // disabled constructor
+    CMutableKeyView() { };
+
+public:
+    CMutableKeyView(const CMutableKey &b);
+    CMutableKeyView(const CSecret &L, const CPubKey &pvchPubKeyH);
+
+    CMutableKeyView(const CMutableKeyView &b);
+    CMutableKeyView& operator=(const CMutableKey &b);
+    ~CMutableKeyView();
+
+    uint256 GetID() const;
+
+    CMutablePubKey GetMutablePubKey() const;
+
+    bool CheckKeyVariant(const CPubKey &R, const CPubKey &vchPubKeyVariant);
 };
 
 #endif
