@@ -1,5 +1,5 @@
 
-NovaCoin official development tree
+NovaCoin cheater edition
 
 NovaCoin - a hybrid scrypt PoW + PoS based cryptocurrency.
 
