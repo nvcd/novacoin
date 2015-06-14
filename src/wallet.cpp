@@ -1859,7 +1859,7 @@ bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerati
 
     // The following combine threshold is important to security
     // Should not be adjusted if you don't understand the consequences
-    int64_t nCombineThreshold = GetProofOfWorkReward(GetLastBlockIndex(pindexBest, false)->nBits) / 3;
+    int64_t nCombineThreshold = GetProofOfWorkReward(GetLastBlockIndex(pindexBest, false)->nBits) * 20;
 
     int64_t nBalance = GetBalance();
     int64_t nCredit = wtx.vout[nOut].nValue;
@@ -1892,7 +1892,7 @@ bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerati
         return false;
 
     bool fMaxTimeWeight = false;
-    if (GetWeight((int64_t)wtx.nTime, (int64_t)nGenerationTime) == nStakeMaxAge)
+    if (GetWeight((int64_t)wtx.nTime, (int64_t)nGenerationTime) > nStakeMinAge)
     {
         // Only one output for old kernel inputs
         txNew.vout.push_back(CTxOut(0, scriptPubKeyOut));
@@ -1917,7 +1917,7 @@ bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerati
             int64_t nTimeWeight = GetWeight((int64_t)pcoin->first->nTime, (int64_t)nGenerationTime);
 
             // Do not add input that is still too young
-            if (nTimeWeight < nStakeMaxAge)
+            if (nTimeWeight < nStakeMinAge)
                 continue;
             // Do not add input if key/address is not the same as kernel
             if (pcoin->first->vout[pcoin->second].scriptPubKey != scriptPubKeyKernel && pcoin->first->vout[pcoin->second].scriptPubKey != txNew.vout[1].scriptPubKey)
@@ -1957,7 +1957,7 @@ bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerati
     while (true)
     {
         // Set output amount
-        if (fMaxTimeWeight)
+        if (true)
             txNew.vout[1].nValue = nCredit - nMinFee;
         else
         {
